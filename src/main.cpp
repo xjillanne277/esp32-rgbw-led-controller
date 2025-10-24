@@ -30,6 +30,14 @@ NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt7Ws2812xMethod> strip4(LED_COUNT, LED_PIN
 
 #define BTN1       23
 #define BTN2       22
+// LED strip configuration
+// - LED_PIN_*: the ESP32 pins driving the LED data lines for each strip
+// - LED_COUNT: how many LED pixels are in each strip
+// Uses NeoPixelBus with the ESP32 RMT method (fast, efficient for many LEDs)
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt4Ws2812xMethod> strip1(LED_COUNT, LED_PIN_1);
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt5Ws2812xMethod> strip2(LED_COUNT, LED_PIN_2);
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt6Ws2812xMethod> strip3(LED_COUNT, LED_PIN_3);
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt7Ws2812xMethod> strip4(LED_COUNT, LED_PIN_4);
 #define BTN3       21
 #define BTN4       19
 
@@ -37,6 +45,11 @@ NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt7Ws2812xMethod> strip4(LED_COUNT, LED_PIN
 #define OLED_SCL   26
 
 // -------- Filtering / display control ----------
+// Pin assignments / wiring
+// - POT_* pins: analog inputs from the physical potentiometers for Red/Green/Blue/White and Brightness
+//   These are read with analogRead (ESP32 12-bit ADC: 0..4095)
+// - BTN* pins: digital input buttons (wired to be active HIGH using hardware pulldowns)
+// - OLED_SDA / OLED_SCL: I2C pins for the SSD1306 OLED display
 static int emaR=0, emaG=0, emaB=0, emaW=0, emaBr=0;
 const uint8_t HYST = 2;
 const uint8_t ALPHA_NUM = 2;
@@ -51,6 +64,11 @@ unsigned long modeUntil = 0;
 
 // Button debounce
 unsigned long lastButtonPress = 0;
+// Input filtering and UI timing
+// - ema*: small state variables used by the exponential moving average (EMA) filter for each analog channel
+// - HYST: hysteresis threshold to avoid tiny, noisy changes causing LED updates
+// - ALPHA_NUM / ALPHA_DEN: EMA weight (alpha = ALPHA_NUM / ALPHA_DEN)
+// - UI update: draw the OLED at a controlled interval (UI_PERIOD_MS)
 const unsigned long debounceDelay = 200;
 
 // ---------- helpers ----------
@@ -59,6 +77,8 @@ int to8bitInv(int raw) {
 }
 
 int median3(int a, int b, int c) {
+// Button debouncing state
+// We remember when the last valid button press occurred and ignore further presses for debounceDelay ms
   if (a > b) { int t=a; a=b; b=t; }
   if (b > c) { int t=b; b=c; c=t; }
   if (a > b) { int t=a; a=b; b=t; }
@@ -98,7 +118,7 @@ void flash(int count, RgbwColor baseColor) {
   }
 }
 
-// --- display helpers (commented out for now) ---
+//display helpers (commented out for now), unplugged display to save space for multiple LEDs
 /*
 void showWelcomeScreen() {
   display.clearDisplay();
@@ -170,7 +190,7 @@ void loop() {
 
   float bf = br / 255.0f;
 
-  // ✅ Corrected RGBW mapping
+  //  Corrected RGBW mapping
   RgbwColor color(
     (int)(r * bf),  // red
     (int)(g * bf),  // green
