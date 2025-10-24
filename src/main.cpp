@@ -7,25 +7,34 @@
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
 
-// -------- LED strip ----------
-#define LED_PIN       13
-#define LED_COUNT     10
-NeoPixelBus<NeoRgbwwFeature, NeoEsp32I2s0800KbpsMethod> strip(LED_COUNT, LED_PIN);
+// -------- LED strips ----------
+#define LED_COUNT 50
+
+#define LED_PIN_1 18
+#define LED_PIN_2 4
+#define LED_PIN_3 17
+#define LED_PIN_4 13
+
+// SK6812 RGBW strips (GRBW order)
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt4Ws2812xMethod> strip1(LED_COUNT, LED_PIN_1);
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt5Ws2812xMethod> strip2(LED_COUNT, LED_PIN_2);
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt6Ws2812xMethod> strip3(LED_COUNT, LED_PIN_3);
+NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt7Ws2812xMethod> strip4(LED_COUNT, LED_PIN_4);
 
 // -------- Pins ----------
-#define POT_R         32
-#define POT_G         35
-#define POT_B         34
-#define POT_W         33
-#define POT_BRIGHT    27
+#define POT_R      32
+#define POT_G      35
+#define POT_B      34
+#define POT_W      33
+#define POT_BRIGHT 27
 
-#define BTN1          23
-#define BTN2          22
-#define BTN3          21
-#define BTN4          19
+#define BTN1       23
+#define BTN2       22
+#define BTN3       21
+#define BTN4       19
 
-#define OLED_SDA      25
-#define OLED_SCL      26
+#define OLED_SDA   25
+#define OLED_SCL   26
 
 // -------- Filtering / display control ----------
 static int emaR=0, emaG=0, emaB=0, emaW=0, emaBr=0;
@@ -67,18 +76,30 @@ int readFiltered8bitInverted(int pin, int &emaState) {
   return emaState;
 }
 
-void flash(int count, RgbwwColor baseColor) {
+void flash(int count, RgbwColor baseColor) {
   for (int i = 0; i < count; i++) {
-    strip.SetPixelColor(0, baseColor);
-    strip.Show();
+    for (int p = 0; p < LED_COUNT; p++) {
+      strip1.SetPixelColor(p, baseColor);
+      strip2.SetPixelColor(p, baseColor);
+      strip3.SetPixelColor(p, baseColor);
+      strip4.SetPixelColor(p, baseColor);
+    }
+    strip1.Show(); strip2.Show(); strip3.Show(); strip4.Show();
     delay(150);
-    strip.SetPixelColor(0, RgbwwColor(0, 0, 0, 0, 0));
-    strip.Show();
+    for (int p = 0; p < LED_COUNT; p++) {
+      RgbwColor off(0,0,0,0);
+      strip1.SetPixelColor(p, off);
+      strip2.SetPixelColor(p, off);
+      strip3.SetPixelColor(p, off);
+      strip4.SetPixelColor(p, off);
+    }
+    strip1.Show(); strip2.Show(); strip3.Show(); strip4.Show();
     delay(150);
   }
 }
 
-// --- display helpers ---
+// --- display helpers (commented out for now) ---
+/*
 void showWelcomeScreen() {
   display.clearDisplay();
   display.setTextSize(2);
@@ -100,51 +121,40 @@ void showModeScreen(int mode) {
   display.setCursor(25, 20);
   display.printf("MODE %d", mode);
   display.display();
-  modeUntil = millis() + 1000;  // show for 1s
+  modeUntil = millis() + 1000;
 }
 
 void drawMainScreen(int r, int g, int b, int w, int br) {
   display.clearDisplay();
   display.setTextSize(2);
-
-  // Left column: RGBW
   display.setCursor(0, 0);
   display.printf("R:%3d\n", r);
   display.printf("G:%3d\n", g);
   display.printf("B:%3d\n", b);
   display.printf("W:%3d\n", w);
-
-  // Right side: Brightness bar + value
-  int barX = 90;
-  int barY = 0;
-  int barH = 50;
-  int barW = 10;
-  int barFill = map(br, 0, 255, 0, barH);
-
-  display.drawRect(barX, barY, barW, barH, SSD1306_WHITE);
-  display.fillRect(barX, barY + (barH - barFill), barW, barFill, SSD1306_WHITE);
-
-  display.setTextSize(1);
-  display.setCursor(barX - 2, barY + barH + 1);
-  display.printf("%3d", br);
-
   display.display();
 }
+*/
 
 void setup() {
   Serial.begin(115200);
-  strip.Begin();
-  strip.Show();
 
+  // Initialize all LED strips
+  strip1.Begin(); strip2.Begin(); strip3.Begin(); strip4.Begin();
+  strip1.Show();  strip2.Show();  strip3.Show();  strip4.Show();
+  delay(50);
+
+  // Commented out OLED for now
+  /*
   Wire.begin(OLED_SDA, OLED_SCL);
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("OLED not found!");
     for(;;);
   }
-
   showWelcomeScreen();
+  */
 
-  // Buttons as INPUT_PULLDOWN (since you have real pulldowns)
+  // Buttons
   pinMode(BTN1, INPUT_PULLDOWN);
   pinMode(BTN2, INPUT_PULLDOWN);
   pinMode(BTN3, INPUT_PULLDOWN);
@@ -159,9 +169,15 @@ void loop() {
   int br = readFiltered8bitInverted(POT_BRIGHT, emaBr);
 
   float bf = br / 255.0f;
-  RgbwwColor color((int)(g * bf), (int)(r * bf), (int)(b * bf), (int)(w * bf), 0);
 
-  // Update LEDs if changed
+  // ✅ Corrected RGBW mapping
+  RgbwColor color(
+    (int)(r * bf),  // red
+    (int)(g * bf),  // green
+    (int)(b * bf),  // blue
+    (int)(w * bf)   // white
+  );
+
   bool changed =
     (lastR < 0) ||
     (abs(r - lastR) >= HYST) ||
@@ -171,36 +187,23 @@ void loop() {
     (abs(br - lastBr) >= HYST);
 
   if (changed) {
-    strip.SetPixelColor(0, color);
-    strip.Show();
+    for (int p = 0; p < LED_COUNT; p++) {
+      strip1.SetPixelColor(p, color);
+      strip2.SetPixelColor(p, color);
+      strip3.SetPixelColor(p, color);
+      strip4.SetPixelColor(p, color);
+    }
+    strip1.Show(); strip2.Show(); strip3.Show(); strip4.Show();
     lastR=r; lastG=g; lastB=b; lastW=w; lastBr=br;
   }
 
   unsigned long now = millis();
 
-  // --- Buttons: active HIGH (pull-downs) ---
   if (now - lastButtonPress > debounceDelay) {
-    if (digitalRead(BTN1)) { showModeScreen(1); flash(1, color); lastButtonPress = now; }
-    else if (digitalRead(BTN2)) { showModeScreen(2); flash(2, color); lastButtonPress = now; }
-    else if (digitalRead(BTN3)) { showModeScreen(3); flash(3, color); lastButtonPress = now; }
-    else if (digitalRead(BTN4)) { showModeScreen(4); flash(4, color); lastButtonPress = now; }
-  }
-
-  // --- If mode screen timeout passed, return to status display ---
-  if (showingMode && millis() > modeUntil) {
-    showingMode = false;
-  }
-
-  // --- Show status display (after welcome, unless currently in mode) ---
-  if (!showingMode && (now - lastUiMs >= UI_PERIOD_MS)) {
-    drawMainScreen(r, g, b, w, br);
-    lastUiMs = now;
-  }
-
-  // If a pot was moved and we’re still on the welcome screen, switch to status display
-  if (showWelcome && changed) {
-    showWelcome = false;
-    drawMainScreen(r, g, b, w, br);
+    if (digitalRead(BTN1)) { flash(1, color); lastButtonPress = now; }
+    else if (digitalRead(BTN2)) { flash(2, color); lastButtonPress = now; }
+    else if (digitalRead(BTN3)) { flash(3, color); lastButtonPress = now; }
+    else if (digitalRead(BTN4)) { flash(4, color); lastButtonPress = now; }
   }
 
   delay(10);
