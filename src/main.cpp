@@ -21,55 +21,35 @@ NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt5Ws2812xMethod> strip2(LED_COUNT, LED_PIN
 NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt6Ws2812xMethod> strip3(LED_COUNT, LED_PIN_3);
 NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt7Ws2812xMethod> strip4(LED_COUNT, LED_PIN_4);
 
-// -------- Pins ----------
+// -------- Analog inputs (pots) ----------
 #define POT_R      32
 #define POT_G      35
 #define POT_B      34
 #define POT_W      33
 #define POT_BRIGHT 27
 
-#define BTN1       23
-#define BTN2       22
-// LED strip configuration
-// - LED_PIN_*: the ESP32 pins driving the LED data lines for each strip
-// - LED_COUNT: how many LED pixels are in each strip
-// Uses NeoPixelBus with the ESP32 RMT method (fast, efficient for many LEDs)
-NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt4Ws2812xMethod> strip1(LED_COUNT, LED_PIN_1);
-NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt5Ws2812xMethod> strip2(LED_COUNT, LED_PIN_2);
-NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt6Ws2812xMethod> strip3(LED_COUNT, LED_PIN_3);
-NeoPixelBus<NeoGrbwFeature, NeoEsp32Rmt7Ws2812xMethod> strip4(LED_COUNT, LED_PIN_4);
-#define BTN3       21
-#define BTN4       19
+// -------- Buttons ----------
+#define BTN1 23
+#define BTN2 22
+#define BTN3 21
+#define BTN4 19
 
-#define OLED_SDA   25
-#define OLED_SCL   26
-
-// -------- Filtering / display control ----------
-// Pin assignments / wiring
-// - POT_* pins: analog inputs from the physical potentiometers for Red/Green/Blue/White and Brightness
-//   These are read with analogRead (ESP32 12-bit ADC: 0..4095)
-// - BTN* pins: digital input buttons (wired to be active HIGH using hardware pulldowns)
-// - OLED_SDA / OLED_SCL: I2C pins for the SSD1306 OLED display
+// -------- Filtering / control variables ----------
 static int emaR=0, emaG=0, emaB=0, emaW=0, emaBr=0;
 const uint8_t HYST = 2;
 const uint8_t ALPHA_NUM = 2;
 const uint8_t ALPHA_DEN = 10;
-unsigned long lastUiMs = 0;
-const uint16_t UI_PERIOD_MS = 60;
 
 int lastR=-1, lastG=-1, lastB=-1, lastW=-1, lastBr=-1;
-bool showWelcome = true;
-bool showingMode = false;
-unsigned long modeUntil = 0;
 
-// Button debounce
-unsigned long lastButtonPress = 0;
-// Input filtering and UI timing
-// - ema*: small state variables used by the exponential moving average (EMA) filter for each analog channel
-// - HYST: hysteresis threshold to avoid tiny, noisy changes causing LED updates
-// - ALPHA_NUM / ALPHA_DEN: EMA weight (alpha = ALPHA_NUM / ALPHA_DEN)
-// - UI update: draw the OLED at a controlled interval (UI_PERIOD_MS)
-const unsigned long debounceDelay = 200;
+// Track which LED strips are currently selected for control
+bool stripSelected[4] = {false, false, false, false};
+
+// --- Per-button debounce and edge detection ---
+const int BTN_PINS[4] = { BTN1, BTN2, BTN3, BTN4 };
+bool lastState[4] = {false, false, false, false};
+unsigned long lastChange[4] = {0, 0, 0, 0};
+const unsigned long DEBOUNCE_MS = 40; // faster debounce
 
 // ---------- helpers ----------
 int to8bitInv(int raw) {
@@ -77,8 +57,6 @@ int to8bitInv(int raw) {
 }
 
 int median3(int a, int b, int c) {
-// Button debouncing state
-// We remember when the last valid button press occurred and ignore further presses for debounceDelay ms
   if (a > b) { int t=a; a=b; b=t; }
   if (b > c) { int t=b; b=c; c=t; }
   if (a > b) { int t=a; a=b; b=t; }
@@ -96,92 +74,38 @@ int readFiltered8bitInverted(int pin, int &emaState) {
   return emaState;
 }
 
-void flash(int count, RgbwColor baseColor) {
-  for (int i = 0; i < count; i++) {
-    for (int p = 0; p < LED_COUNT; p++) {
-      strip1.SetPixelColor(p, baseColor);
-      strip2.SetPixelColor(p, baseColor);
-      strip3.SetPixelColor(p, baseColor);
-      strip4.SetPixelColor(p, baseColor);
-    }
-    strip1.Show(); strip2.Show(); strip3.Show(); strip4.Show();
-    delay(150);
-    for (int p = 0; p < LED_COUNT; p++) {
-      RgbwColor off(0,0,0,0);
-      strip1.SetPixelColor(p, off);
-      strip2.SetPixelColor(p, off);
-      strip3.SetPixelColor(p, off);
-      strip4.SetPixelColor(p, off);
-    }
-    strip1.Show(); strip2.Show(); strip3.Show(); strip4.Show();
-    delay(150);
-  }
-}
-
-//display helpers (commented out for now), unplugged display to save space for multiple LEDs
-/*
-void showWelcomeScreen() {
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(10, 0);
-  display.println("RGBW");
-  display.setCursor(20, 20);
-  display.println("LED");
-  display.setCursor(0, 40);
-  display.println("Controller");
-  display.display();
-}
-
-void showModeScreen(int mode) {
-  showingMode = true;
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setTextColor(SSD1306_WHITE);
-  display.setCursor(25, 20);
-  display.printf("MODE %d", mode);
-  display.display();
-  modeUntil = millis() + 1000;
-}
-
-void drawMainScreen(int r, int g, int b, int w, int br) {
-  display.clearDisplay();
-  display.setTextSize(2);
-  display.setCursor(0, 0);
-  display.printf("R:%3d\n", r);
-  display.printf("G:%3d\n", g);
-  display.printf("B:%3d\n", b);
-  display.printf("W:%3d\n", w);
-  display.display();
-}
-*/
-
+// ---------- setup ----------
 void setup() {
   Serial.begin(115200);
 
-  // Initialize all LED strips
   strip1.Begin(); strip2.Begin(); strip3.Begin(); strip4.Begin();
   strip1.Show();  strip2.Show();  strip3.Show();  strip4.Show();
-  delay(50);
 
-  // Commented out OLED for now
-  /*
-  Wire.begin(OLED_SDA, OLED_SCL);
-  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
-    Serial.println("OLED not found!");
-    for(;;);
+  for (int i = 0; i < 4; i++) {
+    pinMode(BTN_PINS[i], INPUT_PULLDOWN);
   }
-  showWelcomeScreen();
-  */
-
-  // Buttons
-  pinMode(BTN1, INPUT_PULLDOWN);
-  pinMode(BTN2, INPUT_PULLDOWN);
-  pinMode(BTN3, INPUT_PULLDOWN);
-  pinMode(BTN4, INPUT_PULLDOWN);
 }
 
+// ---------- main loop ----------
 void loop() {
+  unsigned long now = millis();
+
+  // --- Fast button edge detection ---
+  for (int i = 0; i < 4; i++) {
+    bool reading = digitalRead(BTN_PINS[i]);
+
+    if (reading != lastState[i] && (now - lastChange[i]) > DEBOUNCE_MS) {
+      lastChange[i] = now;
+      lastState[i] = reading;
+
+      if (reading) { // rising edge (press)
+        stripSelected[i] = !stripSelected[i];
+        Serial.printf("Strip %d %s\n", i + 1, stripSelected[i] ? "SELECTED" : "DESELECTED");
+      }
+    }
+  }
+
+  // --- Pot reading and LED updates ---
   int r  = readFiltered8bitInverted(POT_R,  emaR);
   int g  = readFiltered8bitInverted(POT_G,  emaG);
   int b  = readFiltered8bitInverted(POT_B,  emaB);
@@ -190,12 +114,11 @@ void loop() {
 
   float bf = br / 255.0f;
 
-  //  Corrected RGBW mapping
   RgbwColor color(
-    (int)(r * bf),  // red
-    (int)(g * bf),  // green
-    (int)(b * bf),  // blue
-    (int)(w * bf)   // white
+    (int)(r * bf),
+    (int)(g * bf),
+    (int)(b * bf),
+    (int)(w * bf)
   );
 
   bool changed =
@@ -208,23 +131,19 @@ void loop() {
 
   if (changed) {
     for (int p = 0; p < LED_COUNT; p++) {
-      strip1.SetPixelColor(p, color);
-      strip2.SetPixelColor(p, color);
-      strip3.SetPixelColor(p, color);
-      strip4.SetPixelColor(p, color);
+      if (stripSelected[0]) strip1.SetPixelColor(p, color);
+      if (stripSelected[1]) strip2.SetPixelColor(p, color);
+      if (stripSelected[2]) strip3.SetPixelColor(p, color);
+      if (stripSelected[3]) strip4.SetPixelColor(p, color);
     }
-    strip1.Show(); strip2.Show(); strip3.Show(); strip4.Show();
+
+    if (stripSelected[0]) strip1.Show();
+    if (stripSelected[1]) strip2.Show();
+    if (stripSelected[2]) strip3.Show();
+    if (stripSelected[3]) strip4.Show();
+
     lastR=r; lastG=g; lastB=b; lastW=w; lastBr=br;
   }
 
-  unsigned long now = millis();
-
-  if (now - lastButtonPress > debounceDelay) {
-    if (digitalRead(BTN1)) { flash(1, color); lastButtonPress = now; }
-    else if (digitalRead(BTN2)) { flash(2, color); lastButtonPress = now; }
-    else if (digitalRead(BTN3)) { flash(3, color); lastButtonPress = now; }
-    else if (digitalRead(BTN4)) { flash(4, color); lastButtonPress = now; }
-  }
-
-  delay(10);
+  delay(5); // ultra-smooth loop
 }
